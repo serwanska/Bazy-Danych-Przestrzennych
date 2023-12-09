@@ -1,0 +1,92 @@
+CREATE DATABASE lab3;
+CREATE EXTENSION postgis;
+
+--zad1
+shp2pgsql.exe "C:\Users\gosia\Desktop\bdp\lab3\T2019_KAR_GERMANY\T2019_KAR_BUILDINGS.shp" buildings_2019 | psql -p 5432 -h localhost -U postgres -d lab3
+shp2pgsql.exe "C:\Users\gosia\Desktop\bdp\lab3\T2018_KAR_GERMANY\T2018_KAR_BUILDINGS.shp" buildings_2018 | psql -p 5432 -h localhost -U postgres -d lab3
+
+SELECT * FROM buildings_2019 AS b19
+LEFT JOIN buildings_2018 AS b18 
+ON b19.polygon_id = b18.polygon_id
+WHERE NOT ST_Equals(b19.geom, b18.geom);
+
+--zad2
+shp2pgsql.exe "C:\Users\gosia\Desktop\bdp\lab3\T2018_KAR_GERMANY\T2018_KAR_POI_TABLE.shp" poi_2018 | psql -p 5432 -h localhost -U postgres -d lab3
+shp2pgsql.exe "C:\Users\gosia\Desktop\bdp\lab3\T2019_KAR_GERMANY\T2019_KAR_POI_TABLE.shp" poi_2019 | psql -p 5432 -h localhost -U postgres -d lab3
+
+WITH zad1 AS (
+	SELECT ST_Union(b19.geom) AS geom FROM buildings_2019 AS b19
+	LEFT JOIN buildings_2018 AS b18 
+	ON b19.polygon_id = b18.polygon_id
+	WHERE NOT ST_Equals(b19.geom, b18.geom)
+), new_poi AS (
+	SELECT p19.* FROM poi_2019 AS p19
+	LEFT JOIN poi_2018 AS p18
+	ON p19.poi_id = p18.poi_id
+	WHERE p18.poi_id IS NULL
+)
+
+SELECT new_poi.type, count(new_poi.gid) AS count
+FROM new_poi
+JOIN zad1
+ON ST_Intersects(ST_Buffer(zad1.geom, 0.005), new_poi.geom)
+GROUP BY new_poi.type;
+
+--zad3
+shp2pgsql.exe "C:\Users\gosia\Desktop\bdp\lab3\T2019_KAR_GERMANY\T2019_KAR_STREETS.shp" streets_2019 | psql -p 5432 -h localhost -U postgres -d lab3
+
+CREATE TABLE streets_reprojected AS
+SELECT *
+FROM streets_2019;
+
+UPDATE streets_reprojected
+SET geom = ST_SetSRID(geom, 3068);
+
+--zad4
+CREATE TABLE input_points(
+id int PRIMARY KEY,
+geom geometry
+);
+
+INSERT INTO input_points VALUES
+(1, 'POINT(8.36093 49.03174)'),
+(2, 'POINT(8.39876 49.00644)');
+
+--zad5
+UPDATE input_points
+SET geom = ST_SetSRID(geom, 3068);
+
+--zad6
+shp2pgsql.exe "C:\Users\gosia\Desktop\bdp\lab3\T2019_KAR_GERMANY\T2019_KAR_STREET_NODE.shp" streets_node_2019 | psql -p 5432 -h localhost -U postgres -d lab3
+
+UPDATE streets_node_2019
+SET geom = ST_SetSRID(geom, 3068);
+	
+WITH zad6 AS (
+	SELECT ST_Makeline(geom) AS geom
+	FROM input_points
+)
+
+SELECT sn.node_id
+FROM streets_node_2019 AS sn
+JOIN zad6
+ON ST_Contains(ST_Buffer(zad6.geom, 0.002), sn.geom);
+
+--zad7
+shp2pgsql.exe "C:\Users\gosia\Desktop\bdp\lab3\T2019_KAR_GERMANY\T2019_KAR_LAND_USE_A.shp" land_use_2019 | psql -p 5432 -h localhost -U postgres -d lab3
+
+SELECT COUNT(*)
+FROM poi_2019 AS p19
+JOIN land_use_2019 AS l19
+ON ST_Intersects(ST_Buffer(l19.geom, 0.003), p19.geom)
+WHERE p19.type = 'Sporting Goods Store';
+
+--zad8
+shp2pgsql.exe "C:\Users\gosia\Desktop\bdp\lab3\T2019_KAR_GERMANY\T2019_KAR_WATER_LINES.shp" water_lines_2019 | psql -p 5432 -h localhost -U postgres -d lab3
+shp2pgsql.exe "C:\Users\gosia\Desktop\bdp\lab3\T2019_KAR_GERMANY\T2019_KAR_RAILWAYS.shp" railways_2019 | psql -p 5432 -h localhost -U postgres -d lab3
+
+CREATE TABLE T2019_KAR_BRIDGES AS
+SELECT r.gid AS railway_gid, w.gid AS water_line_gid, ST_Intersection(r.geom, w.geom) AS intersection_geom
+FROM railways_2019 AS r, water_lines_2019 AS w
+WHERE ST_Intersects(r.geom, w.geom);
+
